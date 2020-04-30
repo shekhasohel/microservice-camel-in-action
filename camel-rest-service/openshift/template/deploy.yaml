@@ -3,11 +3,11 @@ apiVersion: v1
 metadata:
   name: "${NAME}-deploy"
   annotations:
-    tags: sit,dde
+    tags: sit,sample
 message: 'The following service(s) have been created in your project: ${NAME}'
 labels:
-  template: dde
-  app: dde
+  template: sample
+  app: sample
 objects:
 - kind: Service
   apiVersion: v1
@@ -23,6 +23,21 @@ objects:
       targetPort: 8080
     selector:
       deploymentconfig: "${NAME}"
+- kind: Route
+  apiVersion: v1
+  metadata:
+    name: "${NAME}"
+    namespace: "${NAMESPACE}"
+  spec:
+    host: "${APPLICATION_DOMAIN}"
+    to:
+      kind: Service
+      name: "${NAME}"
+    port:
+      targetPort: rest
+    tls:
+      termination: passthrough
+      insecureEdgeTerminationPolicy: None
 - kind: DeploymentConfig
   apiVersion: apps.openshift.io/v1
   metadata:
@@ -68,22 +83,14 @@ objects:
               memory: "${MEMORY_REQUEST}"
               cpu: "${CPU_REQUEST}"
           env:
-          - name: JAVA_ARGS
-            value: "-Xms512m -Xmx1024m -Djava.security.egd=file:/dev/./urandom -Xshareclasses -Xquickstart"
           - name: TZ
             value: Asia/Bangkok
-          - name: UAT2_DefaultUserId
-            value: dsladm
-          - name: UAT2_DefaultPassword
-            value: dsladm#
-          - name: UAT2_DefaultDB
-            value: jdbc:oracle:thin:@10.9.225.194:1522:ESLUAT
 parameters:
 - name: NAME
   displayName: Name
   description: The name assigned to all of the objects defined in this template.
   required: true
-  value: dde
+  value: sample
 - name: NAMESPACE
   displayName: Namespace
   description: The OpenShift Namespace where the ImageStream resides.
@@ -114,3 +121,7 @@ parameters:
   description: Starting amount of cpu the container can use.
   required: true
   value: '0.5'
+- name: APPLICATION_DOMAIN
+  displayName: Application Hostname
+  description: The exposed hostname that will route to the Node.js service, if left blank a value will be defaulted.
+  value: ''

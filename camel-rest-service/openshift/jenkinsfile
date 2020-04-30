@@ -31,6 +31,7 @@ pipeline {
                     mvn clean
                     mvn install -X -Dmaven.test.skip=true
                     pwd
+                    cd ..
 
                     cp ${appName}/target/${appName}.war ${appName}-${appVersion}.${BUILD_NUMBER}.war
                 '''
@@ -40,6 +41,11 @@ pipeline {
         stage('Test') {
             steps {
                 echo '*************** Stage: Run Unit and Integration Test **************'
+
+                // sh '''
+                //     cd ${appName}
+                //     mvn test
+                // '''
             }
         }
 
@@ -47,26 +53,26 @@ pipeline {
             steps {
                 echo '*************** Stage: Run SonarQube Scanner **************'
 
-                script {
-                    sh "cd ${appName}"
-                    sh "mvn sonar:sonar -Dsonar.host.url=${sonarqubeURL} \
-                            -Dsonar.login=${sonarqubeToken} \
-                            -Dsonar.projectKey=${appName} \
-                            -Dsonar.sources=${appName} \
-                            -Dsonar.exclusions=target"
+                // script {
+                //     sh "cd ${appName}"
+                //     sh "mvn sonar:sonar -Dsonar.host.url=${sonarqubeURL} \
+                //             -Dsonar.login=${sonarqubeToken} \
+                //             -Dsonar.projectKey=${appName} \
+                //             -Dsonar.sources=${appName} \
+                //             -Dsonar.exclusions=target"
 
-                    def sonarScanResultURL = sh(script:"sed -n 's/^ceTaskUrl=//p' ./.sonar/report-task.txt", returnStdout: true);
+                //     def sonarScanResultURL = sh(script:"sed -n 's/^ceTaskUrl=//p' ./.sonar/report-task.txt", returnStdout: true);
 
-                    wait for sonarqube to wrap up scan report
-                    sleep(time:10,unit:"SECONDS")
+                //     //wait for sonarqube to wrap up scan report
+                //     sleep(time:10,unit:"SECONDS")
 
-                    def sonarScanResult = readJSON text: sh(script:"curl -u ${sonarqubeUsername}:${sonarqubePassword} ${sonarScanResultURL}", returnStdout: true);
-                    echo '*************** Sonar Scanner Result **************'
-                    echo "${sonarScanResult}"
-                    if ("${sonarScanResult.task.status}" != "SUCCESS") {
-                        sh "exit 1"
-                    }
-                }
+                //     def sonarScanResult = readJSON text: sh(script:"curl -u ${sonarqubeUsername}:${sonarqubePassword} ${sonarScanResultURL}", returnStdout: true);
+                //     echo '*************** Sonar Scanner Result **************'
+                //     echo "${sonarScanResult}"
+                //     if ("${sonarScanResult.task.status}" != "SUCCESS") {
+                //         sh "exit 1"
+                //     }
+                // }
             }
         }
 
