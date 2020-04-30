@@ -1,0 +1,205 @@
+pipeline {
+    environment {
+        appName = 'camel-rest-service'
+        appVersion = '1.0'
+        healthcheck_path = '/healthz'
+        nexusBaseURL = '10.2.54.7:5005'
+        dockerRepoURL = '10.212.254.207:5000'
+        openshiftRepoURL = 'default-route-openshift-image-registry.apps.us-west-1.starter.openshift-online.com'
+        nexusCredentialsId = 'nexus'
+        ocp_project = 'cicd'
+    }
+
+    agent any
+
+    stages {
+        stage('Checkout'){
+            steps {
+                echo '*************** Stage: Checkout source code **************'
+                checkout scm
+            }
+        }
+
+        stage('Build') {
+            steps {
+                echo '*************** Stage: Install dependencies and package **************'
+
+                sh '''
+                    mvn -version
+                    
+                    cd ${appName}
+                    mvn clean
+                    mvn install -X -Dmaven.test.skip=true
+                    pwd
+
+                    cp ${appName}/target/${appName}.war ${appName}-${appVersion}.${BUILD_NUMBER}.war
+                '''
+            }
+        }
+
+        stage('Test') {
+            steps {
+                echo '*************** Stage: Run Unit and Integration Test **************'
+            }
+        }
+
+        stage('SonarQube') {
+            steps {
+                echo '*************** Stage: Run SonarQube Scanner **************'
+
+                script {
+                    sh "cd ${appName}"
+                    sh "mvn sonar:sonar -Dsonar.host.url=${sonarqubeURL} \
+                            -Dsonar.login=${sonarqubeToken} \
+                            -Dsonar.projectKey=${appName} \
+                            -Dsonar.sources=${appName} \
+                            -Dsonar.exclusions=target"
+
+                    def sonarScanResultURL = sh(script:"sed -n 's/^ceTaskUrl=//p' ./.sonar/report-task.txt", returnStdout: true);
+
+                    wait for sonarqube to wrap up scan report
+                    sleep(time:10,unit:"SECONDS")
+
+                    def sonarScanResult = readJSON text: sh(script:"curl -u ${sonarqubeUsername}:${sonarqubePassword} ${sonarScanResultURL}", returnStdout: true);
+                    echo '*************** Sonar Scanner Result **************'
+                    echo "${sonarScanResult}"
+                    if ("${sonarScanResult.task.status}" != "SUCCESS") {
+                        sh "exit 1"
+                    }
+                }
+            }
+        }
+
+        stage('Archieve') {
+            steps {
+                echo '*************** Stage: Upload archieve to Nexus **************'
+                
+                // nexusArtifactUploader (
+                //     nexusVersion: 'nexus3',
+                //     protocol: 'http',
+                //     nexusUrl: "${nexusBaseURL}",
+                //     groupId: "com.${appName}",
+                //     version: "${appVersion}.${BUILD_NUMBER}",
+                //     repository: 'openshift-raw',
+                //     credentialsId: "${nexusCredentialsId}",
+                //     artifacts: [
+                //         [
+                //             artifactId: "com.${appName}",
+                //             type: 'war',
+                //             file: "${appName}-${appVersion}.${BUILD_NUMBER}.war"
+                //         ]
+                //     ]
+                // )
+            }
+        }
+
+        stage('OC Build') {
+            steps {
+                echo '*************** Stage: Perform S2I Build **************'
+                
+                script {
+                    openshift.withCluster('oconline') {
+                        openshift.withProject("${ocp_project}") {
+                            echo "In project ${openshift.project()} in cluster ${openshift.cluster()}"
+                            
+                            def ocApplyResult = openshift.apply(openshift.raw("process -f ./${appName}/openshift/template/build.yaml -n ${ocp_project} \
+                                -p NAME='${appName}' \
+                                -p NAMESPACE='${ocp_project}'").actions[0].out).out
+                            echo "${ocApplyResult}"
+
+                            def ocBuildResult = openshift.raw("start-build ${appName} -n ${ocp_project} --from-file ${appName}-${appVersion}.${BUILD_NUMBER}.war --follow --wait").out
+                            echo "${ocBuildResult}"
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Image Archieve'){
+            steps {
+                echo '*************** Stage: Architve Build Image from Openshift Registry to Nexus **************'
+                
+                // script {
+                //     openshift.withCluster('oconline') {
+                //         openshift.withProject("${ocp_project}") {
+                //             echo "In project ${openshift.project()} in cluster ${openshift.cluster()}"
+
+                //             def res = openshift.raw("whoami -t").out
+
+                //             sh """
+                //                 set +x
+                //                 set -e
+                //                 oc login ${openshift.cluster()} --insecure-skip-tls-verify --token=${res}
+                                
+                //                 oc project ${ocp_project}
+
+                //                 skopeo copy \
+                //                 docker://${openshiftRepoURL}/${ocp_project}/${appName}:latest \
+                //                 docker://${dockerRepoURL}/ocp/${appName}:${appVersion}.${BUILD_NUMBER} \
+                //                 --src-tls-verify=false --dest-tls-verify=false \
+                //                 --src-creds=openshift:\$(oc whoami -t)
+                //             """
+                //         }
+                //     }
+                // }
+            }
+        }
+
+        stage('OC ConfigMap') {
+            steps {
+                echo '*************** Stage: Create Config Map on Openshift **************'
+
+                script {
+                    openshift.withCluster('oconline') {
+                        openshift.withProject("${ocp_project}") {
+                            echo "In project ${openshift.project()} in cluster ${openshift.cluster()}"
+
+                            def ocApplyResult = openshift.apply(openshift.raw("create configmap ${appName}-config --from-file=./${appName}/openshift/config/ --dry-run -o yaml").actions[0].out).out
+                            echo "${ocApplyResult}"
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('OC Deploy') {
+            steps {
+                echo '*************** Stage: Deploy App to Openshift **************'
+
+                script {
+                    openshift.withCluster('oconline') {
+                        openshift.withProject("${ocp_project}") {
+                            echo "In project ${openshift.project()} in cluster ${openshift.cluster()}"
+
+                            def ocDeployResult = openshift.apply(openshift.raw("process -f ./${appName}/openshift/template/deploy.yaml -n ${ocp_project} \
+                                -p NAME='${appName}' \
+                                -p NAMESPACE='${ocp_project}' \
+                                -p HEALTHCHECK_PATH='${healthcheck_path}' \
+                                -p MEMORY_LIMIT='2Gi' \
+                                -p MEMORY_REQUEST='1Gi' \
+                                -p CPU_LIMIT='2' \
+                                -p CPU_REQUEST='0.5'").actions[0].out)
+                            
+                            def dc = openshift.selector('dc', "${appName}")
+                            // this will wait until the desired replicas are available
+                            dc.rollout().status()
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Cleanup') {
+            steps {
+                echo '*************** Stage: Clean-up resources **************'
+
+                sh 'rm -rf $(pwd)/*'
+                // mail body: 'project build successful',
+                //             from: 'xxxx@yyyyy.com',
+                //             replyTo: 'xxxx@yyyy.com',
+                //             subject: 'project build successful',
+                //             to: 'yyyyy@yyyy.com'
+            }
+        }
+    }
+}
