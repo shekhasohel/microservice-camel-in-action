@@ -3,9 +3,9 @@ pipeline {
         appName = 'camel-rest-service'
         appVersion = '1.0'
         healthcheck_path = '/healthz'
-        nexusBaseURL = '10.2.54.7:5005'
-        dockerRepoURL = '10.212.254.207:5000'
-        openshiftRepoURL = 'default-route-openshift-image-registry.apps.us-west-1.starter.openshift-online.com'
+        nexusBaseURL = '10.0.0.0:5000'
+        dockerRepoURL = '10.0.0.0:5001'
+        openshiftRepoURL = 'default-route-openshift-image-registry.apps.openshift.com'
         nexusCredentialsId = 'nexus'
         ocp_project = 'cicd'
     }
